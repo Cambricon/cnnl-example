@@ -1,0 +1,81 @@
+/*************************************************************************
+ * Copyright (C) 2021 Cambricon.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *************************************************************************/
+#include "include/context.h"
+#include "include/logging.h"
+#include "include/gen_case.h"
+#include "include/runtime/device.h"
+#include "include/tensor.h"
+#include "include/type.h"
+#include "include/tool.h"
+#include "kernels/unary_op/unary_op_host.h"
+#include "cnnl_example.h"
+#include "abs.h"
+
+static void policyFunc(const cnnlHandle_t &handle,
+                       const cnnlTensorDescriptor_t &desc,
+                       cnrtDim3_t *k_dim,
+                       cnrtFunctionType_t *k_type) {
+  size_t dim = cnnlGetTensorElementNum(desc);
+  // Union1 policyFunc
+  *k_type = CNRT_FUNC_TYPE_UNION1;
+  k_dim->x = handle->core_num_per_cluster;
+  k_dim->y = cnnl::runtime::getClusterLimitCapability(handle);
+  k_dim->z = 1;
+  // if a case is smaller than 2048 , it just need one cluster can work best.
+  size_t small_case_thread = 2048;
+  if (dim <= small_case_thread)
+    k_dim->y = 1;
+}
+
+cnnlStatus_t CNNL_WIN_API cnnlAbs(cnnlHandle_t handle,
+                                  const cnnlTensorDescriptor_t x_desc,
+                                  const void *x,
+                                  const cnnlTensorDescriptor_t y_desc,
+                                  void *y) {
+  cnnlDataType_t support_type[2] = {CNNL_DTYPE_HALF, CNNL_DTYPE_FLOAT};
+  bool zero_element = false;
+  cnnlStatus_t param_check =
+      unaryOpParamCheck("[cnnlAbs]", handle, x_desc, x, y_desc, y, support_type, 2, zero_element);
+  if (zero_element == true) {
+    return CNNL_STATUS_SUCCESS;
+  }
+  if (param_check != CNNL_STATUS_SUCCESS) {
+    return param_check;
+  }
+
+  // generate prototxt
+  if (CNNL_GEN_CASE_ON) {
+    GEN_CASE_START("abs", "ABS");
+    GEN_CASE_DATA(true, "x", x, x_desc, 10, 0);
+    GEN_CASE_DATA(false, "y", y, y_desc, 0, 0);
+    GEN_CASE_TEST_PARAM(true, true, false, 0.003, 0.003, 0);
+  }
+
+  // Choose the best task dimension.
+  cnrtDim3_t k_dim;
+  cnrtFunctionType_t k_type;
+  policyFunc(handle, x_desc, &k_dim, &k_type);
+
+  int32_t element_num = cnnlGetTensorElementNum(x_desc);
+  void (*MLUBlockKernelUnary)(void *x, void *y, uint32_t element_num, float coef);
+  MLUBlockKernelUnary = MLUBlockKernel3StagePipelineAbsfloatFast;
+  if (handle->arch == CNNL_MLU270) {
+    VLOG(5) << "kernel MLUBlockKernel5StagePipelineAbsfloatFast";
+    MLUBlockKernelUnary = MLUBlockKernel5StagePipelineAbsfloatFast;
+  } else {
+    VLOG(5) << "kernel MLUBlockKernel3StagePipelineAbshalfFast";
+    MLUBlockKernelUnary = MLUBlockKernel3StagePipelineAbshalfFast;
+  }
+  KERNEL_CHECK((MLUBlockKernelUnary<<<k_dim, k_type, handle->queue>>>((void *)x, (void *)y,
+                                                                      element_num, 0.0)));
+  return CNNL_STATUS_SUCCESS;
+}

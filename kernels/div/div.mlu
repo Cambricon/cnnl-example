@@ -1,0 +1,83 @@
+/*************************************************************************
+ * Copyright (C) 2021 Cambricon.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *************************************************************************/
+#include <algorithm>
+#include <vector>
+#include <string>
+
+#include "include/context.h"
+#include "include/logging.h"
+#include "include/gen_case.h"
+#include "include/runtime/device.h"
+#include "include/tensor.h"
+#include "include/type.h"
+#include "include/tool.h"
+#include "kernels/binary_op/binary_op_host.h"
+#include "cnnl_example.h"
+#include "div.h"
+
+// threshold of bytes to be processed by each core
+// according to the actual measurement results
+#define THRESHOLD_SIZE (3 * 1024)
+
+cnnlStatus_t CNNL_WIN_API cnnlDiv(cnnlHandle_t handle,
+                                  const cnnlComputationPreference_t prefer,
+                                  const cnnlTensorDescriptor_t x_desc,
+                                  const void *x,
+                                  const cnnlTensorDescriptor_t y_desc,
+                                  const void *y,
+                                  const cnnlTensorDescriptor_t z_desc,
+                                  void *z) {
+  cnnlDataType_t support_type[2] = {CNNL_DTYPE_HALF, CNNL_DTYPE_FLOAT};
+  int number_of_supported_types = 2;
+  bool zero_element = false;
+  cnnlStatus_t param_check =
+      binaryOpParamCheck("cnnlDiv", handle, x_desc, x, y_desc, y, z_desc, z, support_type,
+                         number_of_supported_types, zero_element);
+  if (param_check != CNNL_STATUS_SUCCESS) {
+    return param_check;
+  }
+  if (zero_element == true) {
+    return CNNL_STATUS_SUCCESS;
+  }
+
+  // generate cnnlDiv prototxt
+  if (CNNL_GEN_CASE_ON) {
+    GEN_CASE_START("div", "DIV");
+    GEN_CASE_DATA(true, "x", x, x_desc, 10, 10);
+    GEN_CASE_DATA(true, "y", y, y_desc, 2, 2);
+    GEN_CASE_DATA(false, "z", z, z_desc, 0, 0);
+    GEN_CASE_TEST_PARAM(true, true, false, 0.003, 0.003, 0);
+  }
+
+  cnrtDim3_t k_dim;
+  cnrtFunctionType_t k_type;
+  binaryOpPolicyFunc(handle, x_desc, THRESHOLD_SIZE, &k_dim, &k_type);
+
+  int element_num = cnnlGetTensorElementNum(x_desc);
+  void (*MLUBlockKernelBinary)(void *a, void *b, void *c, int element_num);
+  MLUBlockKernelBinary = NULL;
+  if (x_desc->dtype == CNNL_DTYPE_HALF) {
+    if (prefer == CNNL_COMPUTATION_HIGH_PRECISION) {
+      VLOG(5) << "Kernel MLUKernel3StagePipelineDivhalfHighAcc";
+      MLUBlockKernelBinary = MLUKernel3StagePipelineDivhalfHighAcc;
+    } else {
+      VLOG(5) << "Kernel MLUKernel3StagePipelineDivhalfFast";
+      MLUBlockKernelBinary = MLUKernel3StagePipelineDivhalfFast;
+    }
+  } else {
+    VLOG(5) << "Kernel MLUKernel3StagePipelineDivfloatFast";
+    MLUBlockKernelBinary = MLUKernel3StagePipelineDivfloatFast;
+  }
+  KERNEL_CHECK((MLUBlockKernelBinary<<<k_dim, k_type, handle->queue>>>((void *)x, (void *)y, z,
+                                                                       element_num)));
+  return CNNL_STATUS_SUCCESS;
+}

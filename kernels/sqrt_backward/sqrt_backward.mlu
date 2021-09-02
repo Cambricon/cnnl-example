@@ -1,0 +1,69 @@
+/*************************************************************************
+ * Copyright (C) 2021 Cambricon.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *************************************************************************/
+
+#include "include/context.h"
+#include "include/logging.h"
+#include "include/gen_case.h"
+#include "include/runtime/device.h"
+#include "include/tensor.h"
+#include "include/type.h"
+#include "kernels/binary_op/binary_op_host.h"
+#include "cnnl_example.h"
+#include "sqrt_backward.h"
+
+cnnlStatus_t CNNL_WIN_API cnnlSqrtBackward(cnnlHandle_t handle,
+                                           const cnnlTensorDescriptor_t y_desc,
+                                           const void *y,
+                                           const cnnlTensorDescriptor_t dy_desc,
+                                           const void *diff_y,
+                                           const cnnlTensorDescriptor_t dx_desc,
+                                           void *diff_x) {
+  cnnlDataType_t support_type[2] = {CNNL_DTYPE_HALF, CNNL_DTYPE_FLOAT};
+  int number_of_supported_types = 2;
+  bool zero_element = false;
+  cnnlStatus_t param_check =
+      binaryOpParamCheck("[cnnlSqrtBackward]", handle, y_desc, y, dy_desc, diff_y, dx_desc, diff_x,
+                         support_type, number_of_supported_types, zero_element);
+  if (param_check != CNNL_STATUS_SUCCESS) {
+    return param_check;
+  }
+  if (zero_element == true) {
+    return CNNL_STATUS_SUCCESS;
+  }
+
+  // generate cnnlSqrtBackward prototxt
+  if (CNNL_GEN_CASE_ON) {
+    GEN_CASE_START("sqrt_backward", "SQRT_BACKWARD");
+    GEN_CASE_DATA(true, "y", y, y_desc, 10, 1);
+    GEN_CASE_DATA(true, "diff_y", diff_y, dy_desc, 10, -10);
+    GEN_CASE_DATA(false, "diff_x", diff_x, dx_desc, 0, 0);
+    GEN_CASE_TEST_PARAM(true, true, false, 0.003, 0.003, 0);
+  }
+
+  cnrtDim3_t k_dim;
+  cnrtFunctionType_t k_type;
+  binaryOpPolicyFunc(handle, y_desc, handle->nram_size, &k_dim, &k_type);
+
+  size_t num_elem = cnnlGetTensorElementNum(y_desc);
+  void (*MLUBlockKernelBinary)(void *y, void *diff_y, void *diff_x, int num_elem);
+  MLUBlockKernelBinary = NULL;
+  if (y_desc->dtype == CNNL_DTYPE_HALF) {
+    VLOG(5) << "Kernel MLUKernel3StagePipelineSqrtBackwardhalfHighAcc";
+    MLUBlockKernelBinary = MLUKernel3StagePipelineSqrtBackwardhalfHighAcc;
+  } else {
+    VLOG(5) << "Kernel MLUKernel3StagePipelineSqrtBackwardfloatFast";
+    MLUBlockKernelBinary = MLUKernel3StagePipelineSqrtBackwardfloatFast;
+  }
+  KERNEL_CHECK((MLUBlockKernelBinary<<<k_dim, k_type, handle->queue>>>((void *)y, (void *)diff_y,
+                                                                       diff_x, num_elem)));
+  return CNNL_STATUS_SUCCESS;
+}

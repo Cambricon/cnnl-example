@@ -1,0 +1,101 @@
+/*************************************************************************
+ * Copyright (C) 2021 Cambricon.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+ * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+ * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+ * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *************************************************************************/
+#include "include/context.h"
+#include "include/logging.h"
+#include "include/gen_case.h"
+#include "include/runtime/device.h"
+#include "include/tensor.h"
+#include "include/type.h"
+#include "include/tool.h"
+#include "kernels/unary_op/unary_op_host.h"
+#include "cnnl_example.h"
+#include "log.h"
+
+cnnlStatus_t CNNL_WIN_API cnnlLog(cnnlHandle_t handle,
+                                  const cnnlComputationPreference_t prefer,
+                                  const cnnlLogBase_t base,
+                                  const cnnlTensorDescriptor_t x_desc,
+                                  const void *x,
+                                  const cnnlTensorDescriptor_t y_desc,
+                                  void *y) {
+  cnnlDataType_t support_type[2] = {CNNL_DTYPE_HALF, CNNL_DTYPE_FLOAT};
+  bool zero_element = false;
+  cnnlStatus_t param_check =
+      unaryOpParamCheck("[cnnlLog]", handle, x_desc, x, y_desc, y, support_type, 2, zero_element);
+  if (param_check != CNNL_STATUS_SUCCESS) {
+    return param_check;
+  }
+  if (zero_element == true) {
+    return CNNL_STATUS_SUCCESS;
+  }
+
+  // generate cnnlLog prototxt start!
+  if (CNNL_GEN_CASE_ON) {
+    GEN_CASE_START("log", "LOG");
+    GEN_CASE_DATA(true, "x", x, x_desc, 0.5, 0.001);
+    GEN_CASE_DATA(false, "y", y, y_desc, 0, 0);
+    GEN_CASE_OP_PARAM_SINGLE(3, "log", "log_base", std::to_string(base));
+    GEN_CASE_TEST_PARAM(true, true, false, 0.02, 0.1, 0);
+  }
+
+  cnrtFunctionType_t k_type;
+  cnrtDim3_t k_dim;
+  unaryOpPolicyFunc(handle, x_desc, &k_dim, &k_type);
+  VLOG(5) << "[cnnlLog] Launch [" << k_type << ", " << k_dim.x << ", " << k_dim.y << ", " << k_dim.z
+          << "]";
+
+  float coef = 1.0;
+  if (base == cnnlLogBase_t::CNNL_LOG_E) {
+    coef = 1.0;
+  } else if (base == cnnlLogBase_t::CNNL_LOG_2) {
+    // log2(x) = loge(x) * log2(e)
+    coef = log2(exp(1));
+  } else if (base == cnnlLogBase_t::CNNL_LOG_10) {
+    // log10(x) = loge(x) * log10(e)
+    coef = log10(exp(1));
+  }
+
+  size_t element_num = cnnlGetTensorElementNum(x_desc);
+
+  void (*MLUBlockKernelUnary)(void *x, void *y, uint32_t element_num, float coef);
+  MLUBlockKernelUnary = NULL;
+  if (handle->arch == CNNL_MLU270) {
+    if (x_desc->dtype == CNNL_DTYPE_FLOAT) {
+      VLOG(5) << "kernel MLUBlockKernel5StagePipelineLogfloatFast";
+      MLUBlockKernelUnary = MLUBlockKernel5StagePipelineLogfloatFast;
+    } else {
+      if (prefer == CNNL_COMPUTATION_FAST) {
+        VLOG(5) << "kernel MLUBlockKernel5StagePipelineLoghalfFast";
+        MLUBlockKernelUnary = MLUBlockKernel5StagePipelineLoghalfFast;
+      } else {
+        VLOG(5) << "kernel MLUBlockKernel5StagePipelineLoghalfHighAcc";
+        MLUBlockKernelUnary = MLUBlockKernel5StagePipelineLoghalfHighAcc;
+      }
+    }
+  } else {
+    if (x_desc->dtype == CNNL_DTYPE_FLOAT) {
+      VLOG(5) << "kernel MLUBlockKernel3StagePipelineLogfloatFast";
+      MLUBlockKernelUnary = MLUBlockKernel3StagePipelineLogfloatFast;
+    } else {
+      if (prefer == CNNL_COMPUTATION_FAST) {
+        VLOG(5) << "kernel MLUBlockKernel3StagePipelineLoghalfFast";
+        MLUBlockKernelUnary = MLUBlockKernel3StagePipelineLoghalfFast;
+      } else {
+        VLOG(5) << "kernel MLUBlockKernel3StagePipelineLoghalfHighAcc";
+        MLUBlockKernelUnary = MLUBlockKernel3StagePipelineLoghalfHighAcc;
+      }
+    }
+  }
+  KERNEL_CHECK(
+      (MLUBlockKernelUnary<<<k_dim, k_type, handle->queue>>>((void *)x, y, element_num, coef)));
+  return CNNL_STATUS_SUCCESS;
+}
