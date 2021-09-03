@@ -1,0 +1,33 @@
+name: ci
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: [self-hosted, mlu270-x5k]
+    steps:
+      - uses: actions/checkout@v2
+      - name: build
+        run: >
+          docker run --rm -v $(pwd):/work -w /work docker-user.extrotec.com:30080/cambricon/cnnl-ci:v0.1-ubuntu1604
+          make -j 10 build
+
+          docker run --rm -v $(pwd):/work -w /work docker-user.extrotec.com:30080/cambricon/cnnl-ci:v0.1-ubuntu1604
+          make -C test -j 10 build
+      - name: test
+        run: >
+          docker run --rm --device /dev/cambricon_dev0 --device /dev/cambricon_ctl --device /dev/commu0
+          -v $(pwd):/work -w /work/test -e LD_LIBRARY_PATH=/work/:/work/lib
+          docker-user.extrotec.com:30080/cambricon/cnnl-ci:v0.1-ubuntu1604
+          ./run_test_example.sh
+      - name: clean
+        run: >
+          docker run --rm -v $(pwd):/work -w /work docker-user.extrotec.com:30080/cambricon/cnnl-ci:v0.1-ubuntu1604
+          make clean
+
+          docker run --rm -v $(pwd):/work -w /work docker-user.extrotec.com:30080/cambricon/cnnl-ci:v0.1-ubuntu1604
+          make -C test clean
