@@ -13,13 +13,13 @@ CNNL-Example 提供基于寒武纪机器学习单元（Machine Learning Unit，M
 
 ## 编译 CNNL-Example
 
-- 获取 CNNL-Example 代码：
+- 获取 CNNL-Example 代码
 
   ```sh
   git clone https://github.com/Cambricon/cnnl-example.git
   ```
 
-- 准备 CNToolkit 环境：
+- 准备 CNToolkit 环境
 
   ```sh
   sudo apt-get install ./cntoolkit-x.x.x_Ubuntuxx.xx_amd64.deb
@@ -37,7 +37,7 @@ CNNL-Example 提供基于寒武纪机器学习单元（Machine Learning Unit，M
 
   编译成功后在 cnnl-example 目录下生成 libcnnl_example.so。
 
-# 运行 CNNL-Example
+## 运行 CNNL-Example
 
 - 编译用于测试的可执行文件
 
@@ -51,7 +51,7 @@ CNNL-Example 提供基于寒武纪机器学习单元（Machine Learning Unit，M
 - 执行测试脚本
 
   ```sh
-  export LD_LIBRARY_PATH=${NEUWARE_HOME}:${PWD}/..:${PWD}/../lib
+  export LD_LIBRARY_PATH=${NEUWARE_HOME}/lib64:${PWD}/..:${PWD}/../lib
   ./run_test_example.sh
   ```
 
