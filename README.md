@@ -7,9 +7,9 @@ CNNL-Example 提供基于寒武纪机器学习单元（Machine Learning Unit，M
 - 操作系统：
   - 目前只支持 Ubuntu 16.04 x86_64
 - 寒武纪 MLU SDK：
-  - 编译和运行时依赖 CNToolkit v2.3.x 或更高版本
+  - 编译和运行时依赖 CNToolkit v2.3.2 或更高版本
 - 寒武纪 MLU 驱动：
-  - 运行时依赖驱动 v4.15.x 或更高版本
+  - 运行时依赖驱动 v4.15.3 或更高版本
 
 ## 编译 CNNL-Example
 
