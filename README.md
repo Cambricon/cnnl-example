@@ -2,6 +2,8 @@
 
 CNNL-Example 提供基于寒武纪机器学习单元（Machine Learning Unit，MLU）开发高性能算子、C 接口封装的示例代码。
 
+**_2021/10/27 更新： cnnl-example 所有功能已迁移至 mlu-ops (https://github.com/Cambricon/mlu-ops) 并支持基于 mlu-ops 仓库开发贡献新算子。本仓库将在一个月后弃用，请开发者迁移至 mlu-ops ，谢谢。_**
+
 ## 依赖条件
 
 - 操作系统：
